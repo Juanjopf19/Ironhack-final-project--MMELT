@@ -1,3 +1,47 @@
+#############################################
+# IMPORTS
+#############################################
+
+# Librerías para llamar a la API de Spotify
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import spotipy.util as util
+
+# Librerías para la manipulación de datos
+import pandas as pd
+from collections import Counter
+from random import shuffle
+from datetime import datetime as dt
+from IPython.display import Image
+import time
+import json
+
+pd.set_option("display.max_rows", 100)
+pd.set_option("display.max_colwidth", 1000)
+
+
+#############################################
+# GLOBAL VARIABLES
+#############################################
+
+# Importo las variables globales de otros archivos
+import global_variables as gv
+genres = gv.genres
+client_ID = gv.client_ID
+client_secret = gv.client_secret
+sp = gv.sp
+host = gv.host
+find_URI = gv.find_URI
+
+# La variable artists_genres se nutre cada vez que una canción nueva pasa por mi pipeline
+with open('artists_genres.json') as json_file:  
+    artists_genres = json.load(json_file)
+
+
+#############################################
+# USERS IDENTIFICATION
+#############################################
+
 # Recibo los Spotify URI's de los usuarios que van a linkear su música
 
 def receive_users():
@@ -26,6 +70,11 @@ def receive_users():
         
 # Devuelvo esa diccionario
     return users_URIs
+
+
+#############################################
+# OBTAIN USERS' PLAYLISTS
+#############################################
 
 # Para que los usuarios puedan escoger de entre sus playlists, las obtengo a través de
 # sp.user_playlists, y se las muestro para que puedan seleccionarlas sin volver a Spotify.
@@ -167,6 +216,11 @@ def get_user_playlists(users_URIs):
     return users_URIs, users_playlists_names_URIs, mygroup
 
 
+
+#############################################
+# SAVE PLAYLISTS
+#############################################
+
 # Ahora que ya tengo las playlists que cada usuario quiere subir, guardo sus URIs y la 
 # información de sus temas en la variable global playlists_tracks.
 # Si ya tengo una playlist guardada de una petición anterior, entonces no tendré que
@@ -227,8 +281,12 @@ def save_playlists_tracks(users_URIs, users_playlists_names_URIs, mygroup):
                                                               
     # print("PLAYLISTS TRACKS:", user_playlists_tracks)         
     
-    return users_URIs, mygroup, start_time, user_playlists_tracks
+    return users_URIs, mygroup, start_time, user_playlists_tracks   
 
+
+#############################################
+# OBTAIN FINAL TRACKS
+#############################################
 
 # Ya tengo toda la info de los temas de las playlists a combinar. 
 # Ahora tengo que obtener los temas finales, filtrando por género/fecha de subida en 
@@ -362,7 +420,16 @@ def get_final_tracks(users_URIs, mygroup, start_time, user_playlists_tracks):
         if track_URI not in final_track_URIs_unique_all:
             final_track_URIs_unique_all.append(track_URI)
             
-    # La lista final va a tener como máximo 50 canciones:
+    # Creo otra lista con solo los temas que aparecen repetidos, para utilizarla
+    # después al mostrar el dataframe:
+    
+    final_track_URIs_unique_repeated = []
+    
+    for track in final_track_URIs_unique_all:
+        if final_track_URIs_pop.count(track) > 1:
+            final_track_URIs_unique_repeated.append(track)
+            
+    # La lista final en Spotify va a tener como máximo 50 canciones:
             
     if len(final_track_URIs_unique_all) > 50: 
         final_track_URIs_unique = final_track_URIs_unique_all[:50]
@@ -374,14 +441,18 @@ def get_final_tracks(users_URIs, mygroup, start_time, user_playlists_tracks):
 # Devuelvo el diccionario que relaciona URIs con nombres de temas y artistas, la lista de temas
 # finales con valores únicos, la lista de temas finales con repetidos, mygroup y start_time
 
-    return users_URIs, mygroup, start_time, final_tracks, final_track_URIs_pop, final_track_URIs_unique, user_playlists_tracks 
+    return users_URIs, mygroup, start_time, final_tracks, final_track_URIs_pop, final_track_URIs_unique, user_playlists_tracks, final_track_URIs_unique_repeated
 
+
+#############################################
+# CREATE DATAFRAME FOR DJ
+#############################################
 
 # Creo un dataframe que me muestre las canciones finales ordenadas por popularidad:
 # su URI, nombre, artista y frecuencia.
 
 def create_dataframe(users_URIs, mygroup, start_time, final_tracks, final_track_URIs_pop, 
-                     final_track_URIs_unique, user_playlists_tracks):
+                     final_track_URIs_unique, user_playlists_tracks, final_track_URIs_unique_repeated):
     
 # Creo listas que voy a utilizar como columnas en el dataframe
 
@@ -392,7 +463,7 @@ def create_dataframe(users_URIs, mygroup, start_time, final_tracks, final_track_
 # Obtengo los datos de la lista ordenada de URIs finales, buscando sus datos correspondientes
 # en el diccionario final_tracks, y contando la frecuencia de los temas en final_track_URIs_pop.
 
-    for URI in final_track_URIs_unique:
+    for URI in final_track_URIs_unique_repeated:
             tracks.append(final_tracks.get(URI)[0])
             artists.append(final_tracks.get(URI)[1])
             frequency.append(final_track_URIs_pop.count(URI))
@@ -403,7 +474,7 @@ def create_dataframe(users_URIs, mygroup, start_time, final_tracks, final_track_
     
     count = 0
 
-    for track_uri in final_track_URIs_unique:
+    for track_uri in final_track_URIs_unique_repeated:
         users.append([])
         for user_uri in user_playlists_tracks:
             for i in user_playlists_tracks[user_uri]:
@@ -417,8 +488,8 @@ def create_dataframe(users_URIs, mygroup, start_time, final_tracks, final_track_
             
 # Creo el dataframe
 
-    final_tracks_df = pd.DataFrame(data = [final_track_URIs_unique, tracks, artists, frequency, users],
-                                   columns = range(len(final_track_URIs_unique)), 
+    final_tracks_df = pd.DataFrame(data = [final_track_URIs_unique_repeated, tracks, artists, frequency, users],
+                                   columns = range(len(final_track_URIs_unique_repeated)), 
                                    index = ["ID", "Track", "Artist", "Frequency", "Users"]).T
     
     display(final_tracks_df)
@@ -427,6 +498,11 @@ def create_dataframe(users_URIs, mygroup, start_time, final_tracks, final_track_
 
     return mygroup, start_time, final_track_URIs_unique
 
+
+
+#############################################
+# CREATE PLAYLIST ON SPOTIFY
+#############################################
 
 # Teniendo ya el listado ordenado de URIs de los temas finales, creo la playlist en Spotify
 
@@ -470,4 +546,22 @@ def create_playlist(mygroup, start_time, final_track_URIs_unique):
     
     elapsed_time = time.time() - start_time
     print("Elapsed time:", elapsed_time)
+
+
+#############################################
+# FINAL PIPELINE
+#############################################
+
+if __name__ == '__main__':
     
+    users_URIs = receive_users()
+    
+    users_URIs, users_playlists_names_URIs, mygroup = get_user_playlists(users_URIs)
+    
+    users_URIs, mygroup, start_time, user_playlists_tracks = save_playlists_tracks(users_URIs, users_playlists_names_URIs, mygroup)
+    
+    users_URIs, mygroup, start_time, final_tracks, final_track_URIs_pop, final_track_URIs_unique, user_playlists_tracks, final_track_URIs_unique_repeated = get_final_tracks(users_URIs, mygroup, start_time, user_playlists_tracks)
+    
+    mygroup, start_time, final_track_URIs_unique = create_dataframe(users_URIs, mygroup, start_time, final_tracks, final_track_URIs_pop, final_track_URIs_unique, user_playlists_tracks, final_track_URIs_unique_repeated)
+    
+    create_playlist(mygroup, start_time, final_track_URIs_unique)
